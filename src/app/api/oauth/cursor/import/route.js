@@ -13,7 +13,8 @@ import { isCursorUserApiKey, exchangeCursorApiKey } from "open-sse/services/curs
  *   user API key (dashboard → API Keys). An API key is exchanged for a
  *   short-lived access token and kept so the token can be re-minted.
  * - apiKey: string (optional) - Cursor user API key, same as above
- * - machineId: string - Machine ID from storage.serviceMachineId
+ * - machineId: string (optional) - Machine ID from storage.serviceMachineId;
+ *   generated when omitted
  */
 export async function POST(request) {
   try {
@@ -34,19 +35,18 @@ export async function POST(request) {
       );
     }
 
-    if (!machineId || typeof machineId !== "string") {
-      return NextResponse.json(
-        { error: "Machine ID is required" },
-        { status: 400 }
-      );
-    }
+    // Cursor accepts any stable UUID here (verified with API-key tokens), so
+    // the IDE's own machine id is optional; mint one when it is not supplied.
+    const effectiveMachineId = typeof machineId === "string" && machineId.trim()
+      ? machineId.trim()
+      : randomUUID();
 
     const cursorService = new CursorService();
 
     // Validate token by making API call
     const tokenData = await cursorService.validateImportToken(
       accessToken.trim(),
-      machineId.trim()
+      effectiveMachineId
     );
 
     // Try to extract user info from token
@@ -153,7 +153,8 @@ export async function GET() {
       {
         name: "machineId",
         label: "Machine ID",
-        description: "From storage.serviceMachineId in state.vscdb",
+        description: "Optional. From storage.serviceMachineId in state.vscdb; generated when omitted",
+        required: false,
         type: "text",
       },
     ],

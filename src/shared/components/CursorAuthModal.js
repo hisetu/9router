@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Modal, Button, Input } from "@/shared/components";
+import { Modal, Button } from "@/shared/components";
 
 /**
  * Cursor Auth Modal
- * Auto-detect and import token from Cursor IDE's local SQLite database
+ * Connect with a Cursor user API key (recommended), or an access token
+ * auto-detected from / pasted out of the local Cursor IDE database.
  */
 export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   const [accessToken, setAccessToken] = useState("");
@@ -25,7 +26,15 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
 
     try {
       const res = await fetch("/api/oauth/cursor/auto-import");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+
+      // Auto-detect reads Cursor's local database, so it only works when 9router
+      // runs on the same machine as Cursor (a remote dashboard gets 403
+      // "Local only"). That is the normal case for a server install, not an
+      // error: fall through to the paste form.
+      if (res.status === 403 || res.status === 401) {
+        return;
+      }
 
       if (data.found) {
         setAccessToken(data.accessToken);
@@ -49,17 +58,9 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
     runAutoDetect();
   }, [isOpen]);
 
-  // A Cursor user API key needs no machine ID (the server mints one).
-  const looksLikeApiKey = /^[A-Za-z0-9_-]{32,200}$/.test(accessToken.trim());
-
   const handleImportToken = async () => {
     if (!accessToken.trim()) {
-      setError("Please enter an access token");
-      return;
-    }
-
-    if (!machineId.trim() && !looksLikeApiKey) {
-      setError("Please enter a machine ID");
+      setError("Please enter a Cursor API key or access token");
       return;
     }
 
@@ -72,7 +73,9 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           accessToken: accessToken.trim(),
-          machineId: machineId.trim(),
+          // Only set when auto-detected from the local IDE; otherwise the
+          // server generates one.
+          ...(machineId.trim() ? { machineId: machineId.trim() } : {}),
         }),
       });
 
@@ -92,7 +95,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title="Connect Cursor IDE" onClose={onClose}>
+    <Modal isOpen={isOpen} title="Connect Cursor" onClose={onClose}>
       <div className="flex flex-col gap-4">
         {/* Auto-detecting state */}
         {autoDetecting && (
@@ -148,7 +151,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
                 <div className="flex gap-2">
                   <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">info</span>
                   <p className="text-sm text-blue-800 dark:text-blue-200">
-                    Cursor IDE not detected. Please paste your tokens manually.
+                    Paste a Cursor API key (cursor.com → Dashboard → API Keys). The access token is refreshed automatically.
                   </p>
                 </div>
               </div>
@@ -157,27 +160,14 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
             {/* Access Token Input */}
             <div>
               <label className="block text-sm font-medium mb-2">
-                Access Token or API Key <span className="text-red-500">*</span>
+                API Key or Access Token <span className="text-red-500">*</span>
               </label>
               <textarea
                 value={accessToken}
                 onChange={(e) => setAccessToken(e.target.value)}
-                placeholder="Access token will be auto-filled, or paste a Cursor API key (dashboard → API Keys)..."
+                placeholder="Cursor API key, or an access token from Cursor IDE"
                 rows={3}
                 className="w-full px-3 py-2 text-sm font-mono border border-border rounded-lg bg-background focus:outline-none focus:border-primary resize-none"
-              />
-            </div>
-
-            {/* Machine ID Input */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Machine ID {!looksLikeApiKey && <span className="text-red-500">*</span>}
-              </label>
-              <Input
-                value={machineId}
-                onChange={(e) => setMachineId(e.target.value)}
-                placeholder="Machine ID will be auto-filled..."
-                className="font-mono text-sm"
               />
             </div>
 
@@ -193,9 +183,9 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
               <Button
                 onClick={handleImportToken}
                 fullWidth
-                disabled={importing || !accessToken.trim() || (!machineId.trim() && !looksLikeApiKey)}
+                disabled={importing || !accessToken.trim()}
               >
-                {importing ? "Importing..." : "Import Token"}
+                {importing ? "Connecting..." : "Connect"}
               </Button>
               <Button onClick={onClose} variant="ghost" fullWidth>
                 Cancel
