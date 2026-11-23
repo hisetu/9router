@@ -101,9 +101,12 @@ async function importFromApiKey(apiKey, machineIdInput) {
   }
 
   const userInfo = new CursorService().extractUserInfo(tokens.accessToken);
+  // Same masked form Cursor's dashboard uses (…xxxx), so the row is
+  // recognisable as an API-key connection and tells keys apart.
   const connection = await createProviderConnection({
     provider: "cursor",
     authType: "oauth",
+    name: `API Key …${apiKey.slice(-4)}`,
     apiKey,
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,

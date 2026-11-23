@@ -119,8 +119,16 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
   const isOAuthConnection = rowAuthType === "oauth";
   const isCookieConnection = rowAuthType === "cookie";
   const isLeaseConnection = rowAuthType === "mcode-lease";
-  const authIcon = isLeaseConnection ? "desktop_windows" : isCookieConnection ? "cookie" : isOAuthConnection ? "lock" : "key";
-  const authLabel = isLeaseConnection ? "Desktop Lease" : isOAuthConnection ? "OAuth" : isCookieConnection ? "Cookie" : "API Key";
+  // Cursor stores how a connection was created: from a user API key (token is
+  // re-minted automatically) or from an imported IDE session token.
+  const cursorAuthMethod = connection.provider === "cursor" ? connection.providerSpecificData?.authMethod : null;
+  const isCursorApiKey = cursorAuthMethod === "api_key";
+  const isCursorImported = cursorAuthMethod === "imported";
+  const authIcon = isLeaseConnection ? "desktop_windows" : isCookieConnection ? "cookie" : isCursorApiKey ? "key" : isOAuthConnection ? "lock" : "key";
+  const authLabel = isLeaseConnection ? "Desktop Lease"
+    : isCursorApiKey ? "API Key · auto-refresh"
+    : isCursorImported ? "Imported Token"
+    : isOAuthConnection ? "OAuth" : isCookieConnection ? "Cookie" : "API Key";
   const displayName = connection.name?.trim()
     || connection.email?.trim()
     || connection.displayName?.trim()
