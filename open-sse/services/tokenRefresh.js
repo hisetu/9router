@@ -21,6 +21,7 @@ import {
   refreshNousToken,
   classifyOAuthRefreshError,
 } from "./tokenRefresh/providers.js";
+import { refreshCursorCredentials } from "./cursorApiKey.js";
 
 // Re-export all provider refresh functions (preserves public API for all consumers)
 export {
@@ -164,6 +165,8 @@ const REFRESH_HANDLERS = {
   "minimax-code": (c, log) => refreshMiniMaxCodeToken("minimax-code", c.refreshToken, log),
   "minimax-code-global": (c, log) => refreshMiniMaxCodeToken("minimax-code-global", c.refreshToken, log),
   nous: (c, log) => refreshNousToken(c.refreshToken, log),
+  // Cursor: only connections created from a user API key can refresh (re-exchange).
+  cursor: (c, log) => refreshCursorCredentials(c, log),
   vertex: vertexRefreshHandler,
   "vertex-partner": vertexRefreshHandler
 };

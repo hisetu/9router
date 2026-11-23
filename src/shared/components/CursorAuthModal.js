@@ -49,13 +49,16 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
     runAutoDetect();
   }, [isOpen]);
 
+  // A Cursor user API key needs no machine ID (the server mints one).
+  const looksLikeApiKey = /^[A-Za-z0-9_-]{32,200}$/.test(accessToken.trim());
+
   const handleImportToken = async () => {
     if (!accessToken.trim()) {
       setError("Please enter an access token");
       return;
     }
 
-    if (!machineId.trim()) {
+    if (!machineId.trim() && !looksLikeApiKey) {
       setError("Please enter a machine ID");
       return;
     }
@@ -154,12 +157,12 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
             {/* Access Token Input */}
             <div>
               <label className="block text-sm font-medium mb-2">
-                Access Token <span className="text-red-500">*</span>
+                Access Token or API Key <span className="text-red-500">*</span>
               </label>
               <textarea
                 value={accessToken}
                 onChange={(e) => setAccessToken(e.target.value)}
-                placeholder="Access token will be auto-filled..."
+                placeholder="Access token will be auto-filled, or paste a Cursor API key (dashboard → API Keys)..."
                 rows={3}
                 className="w-full px-3 py-2 text-sm font-mono border border-border rounded-lg bg-background focus:outline-none focus:border-primary resize-none"
               />
@@ -168,7 +171,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
             {/* Machine ID Input */}
             <div>
               <label className="block text-sm font-medium mb-2">
-                Machine ID <span className="text-red-500">*</span>
+                Machine ID {!looksLikeApiKey && <span className="text-red-500">*</span>}
               </label>
               <Input
                 value={machineId}
@@ -190,7 +193,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
               <Button
                 onClick={handleImportToken}
                 fullWidth
-                disabled={importing || !accessToken.trim() || !machineId.trim()}
+                disabled={importing || !accessToken.trim() || (!machineId.trim() && !looksLikeApiKey)}
               >
                 {importing ? "Importing..." : "Import Token"}
               </Button>

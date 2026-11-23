@@ -1,4 +1,5 @@
 import { BaseExecutor } from "./base.js";
+import { refreshCursorCredentials } from "../services/cursorApiKey.js";
 import { PROVIDERS, PROVIDER_OAUTH } from "../config/providers.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import {
@@ -184,7 +185,52 @@ function extractAgentString(message, field) {
   return value ? Buffer.from(value).toString("utf8") : "";
 }
 
-function decodeAgentFrames(buffer, onFrame) {
+// Connect end-of-stream frame: {"error":{"code","message","details":[{type,value}]}}.
+// Cursor puts the user-facing reason (usage limit, plan, auth…) in an
+// aiserver.v1.ErrorDetails detail: 1 error enum, 2 CustomErrorDetails
+// (1 title, 2 detail, 4 is_retryable).
+const CONNECT_CODE_TO_HTTP = {
+  resource_exhausted: 429,
+  unauthenticated: 401,
+  permission_denied: 403,
+  invalid_argument: 400,
+  failed_precondition: 400,
+  not_found: 404,
+  unavailable: 503,
+  deadline_exceeded: 504,
+};
+
+export function parseAgentEndStream(payload) {
+  let json;
+  try { json = JSON.parse(Buffer.from(payload).toString("utf8")); } catch { return null; }
+  const error = json?.error;
+  if (!error || typeof error !== "object") return null;
+  let title = "";
+  let detail = "";
+  for (const d of Array.isArray(error.details) ? error.details : []) {
+    if (!String(d?.type || "").endsWith("ErrorDetails") || typeof d.value !== "string") continue;
+    try {
+      const outer = decodeMessage(new Uint8Array(Buffer.from(d.value, "base64")));
+      const inner = outer.get(2)?.[0]?.value;
+      if (inner) {
+        const custom = decodeMessage(inner);
+        title = extractAgentString(custom, 1) || title;
+        detail = extractAgentString(custom, 2) || detail;
+      }
+    } catch {}
+    if (title || detail) break;
+  }
+  const code = typeof error.code === "string" ? error.code : "";
+  const parts = [title, detail].filter(Boolean);
+  const message = parts.length ? parts.join(": ") : (error.message || code || "request failed");
+  return {
+    code,
+    status: CONNECT_CODE_TO_HTTP[code] || HTTP_STATUS.BAD_REQUEST,
+    message: `Cursor AgentService ${code || "error"}: ${message}`,
+  };
+}
+
+function decodeAgentFrames(buffer, onFrame, onTrailer) {
   let pending = Buffer.from(buffer || []);
   while (pending.length >= 5) {
     const flags = pending[0];
@@ -196,6 +242,7 @@ function decodeAgentFrames(buffer, onFrame) {
       payload = zlib.gunzipSync(payload);
     }
     if (!(flags & COMPRESS_FLAG.TRAILER)) onFrame(payload);
+    else onTrailer?.(payload);
   }
   return pending;
 }
@@ -840,6 +887,13 @@ export class CursorExecutor extends BaseExecutor {
                 }
               }
             }
+          }, (payload) => {
+            if (finished) return;
+            const endError = parseAgentEndStream(payload);
+            if (!endError) return;
+            log?.warn?.("CURSOR", endError.message);
+            finished = true;
+            onEvent({ type: "error", value: endError.message, status: endError.status, upstream: true });
           });
         }
         if (!finished) finishTurn();
@@ -882,7 +936,7 @@ export class CursorExecutor extends BaseExecutor {
           if (event.type === "error") turnError = event;
           else wrapped(event);
         });
-        if (turnError && shouldRetryEmptyTurn(originalMessages.length) && !outputStarted && attempt < CURSOR_EMPTY_TURN_MAX_RETRIES && !requestController.signal.aborted) {
+        if (turnError && !turnError.upstream && shouldRetryEmptyTurn(originalMessages.length) && !outputStarted && attempt < CURSOR_EMPTY_TURN_MAX_RETRIES && !requestController.signal.aborted) {
           attempt++;
           log?.info?.("CURSOR", `empty_turn on ${originalMessages.length}-message session; retry ${attempt}/${CURSOR_EMPTY_TURN_MAX_RETRIES} with tail-only frame`);
           workingMessages = tailOnlyCursorMessages(originalMessages);
@@ -905,6 +959,7 @@ export class CursorExecutor extends BaseExecutor {
       let content = "";
       let reasoning = "";
       let agentError = null;
+      let agentErrorStatus = HTTP_STATUS.BAD_REQUEST;
       const toolCalls = [];
       let finishReason = "stop";
       await runWithRetry((event) => {
@@ -918,13 +973,16 @@ export class CursorExecutor extends BaseExecutor {
           });
           finishReason = "tool_calls";
         }
-        else if (event.type === "error") agentError = event.value;
+        else if (event.type === "error") {
+          agentError = event.value;
+          if (event.status) agentErrorStatus = event.status;
+        }
         else if (event.type === "done" && event.finishReason) finishReason = event.finishReason;
       });
       if (agentError) {
         return {
           response: new Response(JSON.stringify({ error: { message: agentError, type: "api_error" } }), {
-            status: HTTP_STATUS.BAD_REQUEST,
+            status: agentErrorStatus,
             headers: { "Content-Type": "application/json" },
           }),
           url,
@@ -1451,8 +1509,8 @@ export class CursorExecutor extends BaseExecutor {
     });
   }
 
-  async refreshCredentials() {
-    return null;
+  async refreshCredentials(credentials, log) {
+    return refreshCursorCredentials(credentials, log);
   }
 }
 
